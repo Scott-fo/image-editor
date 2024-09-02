@@ -41,6 +41,49 @@ class ImageEditor {
     console.log('ImageEditor initialized');
   }
 
+  serializeState() {
+    return JSON.stringify({
+      images: this.images.map(img => ({
+        src: img.img.src,
+        x: img.x,
+        y: img.y,
+        width: img.width,
+        height: img.height,
+        rotation: img.rotation
+      })),
+      selectedImageIndex: this.images.indexOf(this.selectedImage)
+    });
+  }
+
+  async deserializeState(serializedState) {
+    const state = JSON.parse(serializedState);
+    this.images = [];
+    for (const imgData of state.images) {
+      const img = new Image();
+      img.src = imgData.src;
+      await new Promise(resolve => {
+        img.onload = resolve;
+      });
+      const newImage = new ImageItem(img, imgData.x, imgData.y, imgData.width, imgData.height);
+      newImage.rotation = imgData.rotation;
+      this.images.push(newImage);
+    }
+    this.selectedImage = this.images[state.selectedImageIndex] || null;
+    this.draw();
+  }
+
+  saveToLocalStorage() {
+    const serializedState = this.serializeState();
+    localStorage.setItem('imageEditorState', serializedState);
+  }
+
+  async loadFromLocalStorage() {
+    const serializedState = localStorage.getItem('imageEditorState');
+    if (serializedState) {
+      await this.deserializeState(serializedState);
+    }
+  }
+
   resizeCanvas() {
     const rect = this.canvas.getBoundingClientRect();
     this.canvas.width = rect.width;
@@ -78,7 +121,7 @@ class ImageEditor {
         reject(error);
       };
       img.src = src;
-    });
+    }).then(this.saveToLocalStorage());
   }
 
   deleteSelectedImage() {
@@ -86,6 +129,7 @@ class ImageEditor {
       this.images = this.images.filter(img => img !== this.selectedImage);
       this.selectedImage = null;
       this.draw();
+      this.saveToLocalStorage();
     }
   }
 
@@ -266,6 +310,7 @@ class ImageEditor {
     this.isRotating = false;
     this.dragHandle = null;
     this.canvas.classList.remove('grabbing');
+    this.saveToLocalStorage();
   }
 
   resize(image, x, y) {
@@ -342,10 +387,14 @@ class ImageEditor {
     image.width = newWidth;
     image.height = newHeight;
     this.draw();
+    this.saveToLocalStorage();
   }
 }
 
 const editor = new ImageEditor('canvas');
+editor.loadFromLocalStorage().then(() => {
+  console.log('Editor state loaded from local storage');
+});
 
 document.getElementById('uploadIcon').addEventListener('click', () => {
   const input = document.createElement('input');
