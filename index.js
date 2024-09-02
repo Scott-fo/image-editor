@@ -6,6 +6,7 @@ class ImageItem {
     this.width = width;
     this.height = height;
     this.aspectRatio = img.naturalWidth / img.naturalHeight;
+    this.rotation = 0; // Add this line
   }
 }
 
@@ -41,8 +42,9 @@ class ImageEditor {
   }
 
   resizeCanvas() {
-    this.canvas.width = window.innerWidth;
-    this.canvas.height = window.innerHeight;
+    const rect = this.canvas.getBoundingClientRect();
+    this.canvas.width = rect.width;
+    this.canvas.height = rect.height;
     this.draw();
     console.log('Canvas resized:', this.canvas.width, this.canvas.height);
   }
@@ -79,12 +81,28 @@ class ImageEditor {
     });
   }
 
+  deleteSelectedImage() {
+    if (this.selectedImage) {
+      this.images = this.images.filter(img => img !== this.selectedImage);
+      this.selectedImage = null;
+      this.draw();
+    }
+  }
+
   draw() {
     console.log('Drawing images:', this.images.length);
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     this.images.forEach((img, index) => {
-      console.log(`Drawing image ${index}:`, img.x, img.y, img.width, img.height);
-      this.ctx.drawImage(img.img, img.x, img.y, img.width, img.height);
+      console.log(`Drawing image ${index}:`, img.x, img.y, img.width, img.height, img.rotation);
+      this.ctx.save();
+      this.ctx.translate(img.x + img.width / 2, img.y + img.height / 2);
+      this.ctx.rotate(img.rotation);
+      this.ctx.drawImage(
+        img.img,
+        -img.width / 2, -img.height / 2,
+        img.width, img.height
+      );
+      this.ctx.restore();
     });
     if (this.selectedImage) {
       this.drawHandles(this.selectedImage);
@@ -92,28 +110,76 @@ class ImageEditor {
   }
 
   drawHandles(image) {
+    const centerX = image.x + image.width / 2;
+    const centerY = image.y + image.height / 2;
+
+    const rotatePoint = (x, y, angle) => {
+      const dx = x - centerX;
+      const dy = y - centerY;
+      return {
+        x: centerX + dx * Math.cos(angle) - dy * Math.sin(angle),
+        y: centerY + dx * Math.sin(angle) + dy * Math.cos(angle)
+      };
+    };
+
     const handles = [
       { x: image.x, y: image.y, cursor: 'nw-resize' },
+      { x: image.x + image.width, y: image.y + image.height / 2, cursor: 'e-resize' },
+      { x: image.x, y: image.y + image.height / 2, cursor: 'w-resize' },
       { x: image.x + image.width, y: image.y, cursor: 'ne-resize' },
       { x: image.x, y: image.y + image.height, cursor: 'sw-resize' },
-      { x: image.x + image.width, y: image.y + image.height, cursor: 'se-resize' }
-    ];
+      { x: image.x + image.width, y: image.y + image.height, cursor: 'se-resize' },
+      { x: image.x + image.width / 2, y: image.y - 20, cursor: 'grab' } // Rotation handle
+    ].map(handle => {
+      const rotated = rotatePoint(handle.x, handle.y, image.rotation);
+      return { ...handle, ...rotated };
+    });
 
     this.ctx.fillStyle = 'blue';
     handles.forEach(handle => {
-      this.ctx.fillRect(handle.x - this.handleSize / 2, handle.y - this.handleSize / 2, this.handleSize, this.handleSize);
+      this.ctx.save();
+      this.ctx.translate(handle.x, handle.y);
+      this.ctx.rotate(image.rotation);
+      this.ctx.fillRect(-this.handleSize / 2, -this.handleSize / 2, this.handleSize, this.handleSize);
+      this.ctx.restore();
     });
+
+    const topCenter = rotatePoint(image.x + image.width / 2, image.y, image.rotation);
+    const rotationHandle = handles[handles.length - 1];
+    this.ctx.beginPath();
+    this.ctx.moveTo(topCenter.x, topCenter.y);
+    this.ctx.lineTo(rotationHandle.x, rotationHandle.y);
+    this.ctx.strokeStyle = 'blue';
+    this.ctx.stroke();
   }
 
   getHandle(x, y) {
     if (!this.selectedImage) return null;
     const image = this.selectedImage;
+    const centerX = image.x + image.width / 2;
+    const centerY = image.y + image.height / 2;
+
+    const rotatePoint = (px, py, angle) => {
+      const dx = px - centerX;
+      const dy = py - centerY;
+      return {
+        x: centerX + dx * Math.cos(angle) - dy * Math.sin(angle),
+        y: centerY + dx * Math.sin(angle) + dy * Math.cos(angle)
+      };
+    };
+
     const handles = [
       { x: image.x, y: image.y, cursor: 'nw-resize' },
+      { x: image.x + image.width, y: image.y + image.height / 2, cursor: 'e-resize' },
+      { x: image.x, y: image.y + image.height / 2, cursor: 'w-resize' },
       { x: image.x + image.width, y: image.y, cursor: 'ne-resize' },
       { x: image.x, y: image.y + image.height, cursor: 'sw-resize' },
-      { x: image.x + image.width, y: image.y + image.height, cursor: 'se-resize' }
-    ];
+      { x: image.x + image.width, y: image.y + image.height, cursor: 'se-resize' },
+      { x: image.x + image.width / 2, y: image.y - 20, cursor: 'grab' } // Rotation handle
+    ].map(handle => {
+      const rotated = rotatePoint(handle.x, handle.y, image.rotation);
+      return { ...handle, ...rotated };
+    });
 
     for (let handle of handles) {
       if (Math.abs(x - handle.x) < this.handleSize / 2 && Math.abs(y - handle.y) < this.handleSize / 2) {
@@ -140,7 +206,15 @@ class ImageEditor {
 
     this.dragHandle = this.getHandle(x, y);
     if (this.dragHandle) {
-      this.isResizing = true;
+      if (this.dragHandle === 'grab') {
+        this.isRotating = true;
+        this.canvas.classList.add('grabbing');
+        const centerX = this.selectedImage.x + this.selectedImage.width / 2;
+        const centerY = this.selectedImage.y + this.selectedImage.height / 2;
+        this.initialAngle = Math.atan2(y - centerY, x - centerX) - this.selectedImage.rotation;
+      } else {
+        this.isResizing = true;
+      }
     } else {
       const clickedImage = this.getImageAtPoint(x, y);
       if (clickedImage) {
@@ -164,6 +238,12 @@ class ImageEditor {
 
     if (this.isResizing && this.selectedImage) {
       this.resize(this.selectedImage, x, y);
+    } else if (this.isRotating && this.selectedImage) {
+      const centerX = this.selectedImage.x + this.selectedImage.width / 2;
+      const centerY = this.selectedImage.y + this.selectedImage.height / 2;
+      const angle = Math.atan2(y - centerY, x - centerX);
+      this.selectedImage.rotation = angle - this.initialAngle;
+      this.draw();
     } else if (this.isDragging && this.selectedImage) {
       this.selectedImage.x = x - this.dragStartX;
       this.selectedImage.y = y - this.dragStartY;
@@ -183,7 +263,9 @@ class ImageEditor {
   onMouseUp() {
     this.isResizing = false;
     this.isDragging = false;
+    this.isRotating = false;
     this.dragHandle = null;
+    this.canvas.classList.remove('grabbing');
   }
 
   resize(image, x, y) {
@@ -194,6 +276,18 @@ class ImageEditor {
         newHeight = image.height + image.y - y;
         anchorX = image.x + image.width;
         anchorY = image.y + image.height;
+        break;
+      case 'w-resize':
+        newWidth = image.width + image.x - x;
+        newHeight = image.height;
+        anchorX = image.x + image.width;
+        anchorY = image.y;
+        break;
+      case 'e-resize':
+        newWidth = x - image.x;
+        newHeight = image.height
+        anchorX = image.x
+        anchorY = image.y
         break;
       case 'ne-resize':
         newWidth = x - image.x;
@@ -231,12 +325,16 @@ class ImageEditor {
         image.x = anchorX - newWidth;
         image.y = anchorY - newHeight;
         break;
+      case 'w-resize':
+        image.x = anchorX - newWidth;
+        break;
       case 'ne-resize':
         image.y = anchorY - newHeight;
         break;
       case 'sw-resize':
         image.x = anchorX - newWidth;
         break;
+      case 'e-resize':
       case 'se-resize':
         break;
     }
@@ -249,25 +347,45 @@ class ImageEditor {
 
 const editor = new ImageEditor('canvas');
 
-document.getElementById('imageUpload').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  const reader = new FileReader();
+document.getElementById('uploadIcon').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
 
-  reader.onload = async (event) => {
-    console.log('File read successfully');
-    try {
-      await editor.addImage(event.target.result);
-      console.log('Image added successfully');
-    } catch (error) {
-      console.error('Error adding image:', error);
+    reader.onload = async (event) => {
+      console.log('File read successfully');
+      try {
+        await editor.addImage(event.target.result);
+        console.log('Image added successfully');
+      } catch (error) {
+        console.error('Error adding image:', error);
+      }
+    };
+
+    reader.onerror = (error) => {
+      console.error('Error reading file:', error);
+    };
+
+    reader.readAsDataURL(file);
+  };
+  input.click();
+});
+
+document.getElementById('deleteIcon').addEventListener('click', () => {
+  editor.deleteSelectedImage();
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Backspace' || event.key === 'Delete') {
+    event.preventDefault();
+
+    if (event.target.tagName !== 'INPUT' && event.target.tagName !== 'TEXTAREA') {
+      editor.deleteSelectedImage();
     }
-  };
-
-  reader.onerror = (error) => {
-    console.error('Error reading file:', error);
-  };
-
-  reader.readAsDataURL(file);
+  }
 });
 
 console.log('Script loaded');
